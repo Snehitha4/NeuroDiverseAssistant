@@ -6,14 +6,16 @@ import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 const App = () => {
-  const [text, setText] = useState("");
-  const [summary, setSummary] = useState("");
-  const [events, setEvents] = useState([]);
+  const [text, setText] = useState(""); // Transcribed text
+  const [summary, setSummary] = useState(""); // AI-generated summary
+  const [events, setEvents] = useState([]); // List of scheduled events
+  const [markedDates, setMarkedDates] = useState(new Set()); // Dates marked on the calendar
   const [selectedDate, setSelectedDate] = useState(null);
-  const [audioUrl, setAudioUrl] = useState("");
   const [listening, setListening] = useState(false);
+  const [taskInput, setTaskInput] = useState(""); // Task input field
   let recognition = null;
 
+  // Function to start voice recognition
   const startListening = () => {
     if (!("webkitSpeechRecognition" in window)) {
       toast.error("Speech recognition not supported in this browser.");
@@ -22,7 +24,7 @@ const App = () => {
 
     recognition = new window.webkitSpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = true;
+    recognition.continuous = false;
 
     recognition.onstart = () => setListening(true);
     recognition.onend = () => setListening(false);
@@ -30,85 +32,139 @@ const App = () => {
     recognition.onresult = async (event) => {
       const transcript = event.results[event.results.length - 1][0].transcript;
       setText(transcript);
+      toast.success("Transcription completed!");
 
       try {
-        const response = await axios.post("http://localhost:5000/transcribe", { text: transcript });
-        setSummary(response.data.summary);
-        toast.success("Summary updated!");
-        extractDates(response.data.summary);
+        // Send text to backend for summary and date extraction
+        const response = await axios.post("http://localhost:5000/process-text", { text: transcript });
+        const { summary, dates } = response.data;
+
+        setSummary(summary);
+        if (dates.length > 0) {
+          setMarkedDates(new Set([...markedDates, ...dates]));
+          setEvents([...events, ...dates.map((date) => ({ date, summary }))]);
+          toast.success("Dates extracted and marked on the calendar!");
+        } else {
+          toast.warning("No dates found in the summary.");
+        }
       } catch (error) {
-        console.error("Error transcribing:", error);
-        toast.error("Failed to summarize text.");
+        console.error("Error processing text:", error);
+        toast.error("Failed to process text.");
       }
     };
 
     recognition.start();
   };
 
-  const extractDates = async (summaryText) => {
-    try {
-      const response = await axios.post("http://localhost:5000/extract-dates", { text: summaryText });
-      setEvents(response.data.dates.map(date => ({ date, summary: "Meeting Event" })));
-    } catch (error) {
-      console.error("Error extracting dates:", error);
-      toast.error("Failed to extract dates.");
-    }
-  };
-
-  const synthesizeAudio = async () => {
-    if (!summary) {
-      toast.error("No summary available to convert to speech.");
+  // Function to add task to selected date
+  const addTaskToDate = () => {
+    if (taskInput.trim() === "") {
+      toast.error("Task cannot be empty!");
       return;
     }
-    try {
-      const response = await axios.post("http://localhost:5000/synthesize", { text: summary });
-      if (!response.data.audioContent) throw new Error("Invalid audio response");
 
-      const binary = atob(response.data.audioContent);
-      const byteArray = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        byteArray[i] = binary.charCodeAt(i);
-      }
-
-      const audioBlob = new Blob([byteArray], { type: "audio/mp3" });
-      setAudioUrl(URL.createObjectURL(audioBlob));
-      toast.success("Audio generated successfully!");
-    } catch (error) {
-      console.error("Error generating audio:", error);
-      toast.error("Failed to generate audio.");
-    }
+    const newEvent = { date: selectedDate, task: taskInput };
+    setEvents((prevEvents) => [...prevEvents, newEvent]);
+    setMarkedDates((prevDates) => new Set([...prevDates, selectedDate]));
+    setTaskInput(""); // Clear task input
+    toast.success("Task added to calendar!");
   };
 
   return (
-    <div className="p-6">
-      <button onClick={startListening} className={`px-4 py-2 rounded ${listening ? "bg-red-500" : "bg-blue-500"} text-white`}>
-        {listening ? "Listening..." : "Start Meeting"}
+    <div className="container p-4" style={{ fontFamily: "Arial, sans-serif" }}>
+      <h1 className="text-center mb-4" style={{ color: "#4a90e2" }}>
+        Voice Transcription and Task Management
+      </h1>
+      
+      {/* Start Voice Recording Button */}
+      <button
+        onClick={startListening}
+        className={`btn ${listening ? "btn-danger" : "btn-primary"} btn-lg w-100 mb-4`}
+      >
+        {listening ? "Listening..." : "Start Recording"}
       </button>
 
+      {/* Display Live Transcription */}
       <div className="mt-4">
-        <h2 className="text-lg font-bold">Live Transcription</h2>
-        <p className="border p-4">{text}</p>
+        <h2 className="h4 font-weight-bold mb-2" style={{ color: "#333" }}>
+          Live Transcription
+        </h2>
+        <p className="border p-4" style={{ borderRadius: "8px", backgroundColor: "#f9f9f9" }}>
+          {text}
+        </p>
       </div>
 
+      {/* Display Summary */}
       <div className="mt-4">
-        <h2 className="text-lg font-bold">Summarized</h2>
-        <p className="border p-4">{summary}</p>
-        <button onClick={synthesizeAudio} className="bg-green-500 text-white px-4 py-2 mt-2 rounded">Listen</button>
-        {audioUrl && <audio controls src={audioUrl} className="mt-2"></audio>}
+        <h2 className="h4 font-weight-bold mb-2" style={{ color: "#333" }}>
+          Summary
+        </h2>
+        <p className="border p-4" style={{ borderRadius: "8px", backgroundColor: "#f9f9f9" }}>
+          {summary}
+        </p>
       </div>
 
+      {/* Calendar Section */}
       <div className="mt-4">
-        <h2 className="text-lg font-bold">Meeting Calendar</h2>
-        <Calendar onClickDay={(date) => setSelectedDate(date.toISOString().split("T")[0])} />
+        <h2 className="h4 font-weight-bold mb-2" style={{ color: "#333" }}>
+          Meeting Calendar
+        </h2>
+        <Calendar
+          tileClassName={({ date }) => (markedDates.has(date.toISOString().split("T")[0]) ? "highlighted-date" : "")}
+          onClickDay={(date) => setSelectedDate(date.toISOString().split("T")[0])}
+          style={{ borderRadius: "8px" }}
+        />
+        
+       {/* Task Input & Add Task Button */}
+{selectedDate && (
+  <div className="mt-4 p-4 bg-light rounded" style={{ maxWidth: "400px" }}>
+    <h3 className="h5 font-weight-bold mb-2">
+      Add Task for {selectedDate}
+    </h3>
+    <input
+      type="text"
+      value={taskInput}
+      onChange={(e) => setTaskInput(e.target.value)}
+      className="form-control mb-2"
+      placeholder="Enter task"
+    />
+    <button
+      onClick={addTaskToDate}
+      className="btn btn-success w-100"
+    >
+      Add Task
+    </button>
+  </div>
+)}
+
+
+        {/* Display Tasks */}
         {selectedDate && (
           <div className="mt-2 p-4 bg-gray-100 rounded">
-            {events.filter(event => event.date === selectedDate).map((event, index) => <p key={index}>{event.summary}</p>)}
+            <h3 className="h5 font-weight-bold mb-2">Tasks on {selectedDate}:</h3>
+            {events
+              .filter((event) => event.date === selectedDate)
+              .map((event, index) => (
+                <p key={index} className="mb-2" style={{ color: "#555" }}>
+                  {event.task || event.summary}
+                </p>
+              ))}
           </div>
         )}
       </div>
 
-      {/* Add ToastContainer here */}
+      {/* Notifications */}
       <ToastContainer position="top-right" autoClose={3000} />
+
+      {/* Calendar Highlighting Styles */}
+      <style>
+        {`
+          .highlighted-date {
+            background: #ffcc00 !important;
+            border-radius: 50%;
+          }
+        `}
+      </style>
     </div>
   );
 };
