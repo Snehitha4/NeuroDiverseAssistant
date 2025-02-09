@@ -131,8 +131,7 @@ const App = () => {
     <button
       onClick={addTaskToDate}
       className="btn btn-success w-100"
-    >
-      Add Task
+    > Add Task
     </button>
   </div>
 )}
